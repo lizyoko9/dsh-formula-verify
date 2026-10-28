@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0 — 2026-10-28
+
+- Add the Formula Lab client panel: pick a workspace paper, run conversion/extraction, and browse the section-grouped report without typing commands.
+- Add a host route (`/formula-lab`) protected by a per-process token injected into the DSH index; the route runs the bundled Python CLI.
+- The panel supports TeX/Markdown/PDF sources, optional Mathpix or external-command conversion, auto-probe, and opens cards/report/index in the document preview.
+- Declare the package's client half (`client.js`) and mount the panel as a right-Sidebar tab type with a guide card.
+
 ## 0.3.0 — 2026-10-28
 
 - Add `paper convert` with two backends: Mathpix (`MATHPIX_APP_ID` / `MATHPIX_APP_KEY`) and an external `--command` converter such as MinerU/Nougat.

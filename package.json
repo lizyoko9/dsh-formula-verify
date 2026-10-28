@@ -1,15 +1,18 @@
 {
   "name": "dsh-formula-verify",
-  "version": "0.3.0",
-  "description": "Formula verification skill and SymPy CLI for DeepSeek Harness",
+  "version": "0.4.0",
+  "description": "Formula verification skill, Formula Lab panel and SymPy CLI for DeepSeek Harness",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
     ".": "./lib/index.js",
+    "./client": "./client.js",
     "./package.json": "./package.json"
   },
   "files": [
     "lib/index.js",
+    "lib/lab.js",
+    "client.js",
     "assets",
     "cordis.patch.yml",
     "README.md",
@@ -28,6 +31,14 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-sidebar-right",
+        "@deepseek-ai/dsh-client-locale"
+      ]
     }
   },
   "peerDependencies": {

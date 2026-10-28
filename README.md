@@ -81,6 +81,18 @@ python3 ~/.dsh/skills/formula-verify/scripts/formula_check.py test --path formul
 
 `test` runs pytest inside the private environment, so the project does not need its own pytest or SymPy install.
 
+## Formula Lab panel
+
+The bundle also ships a **Formula Lab** panel in the right Sidebar:
+
+- Install the bundle from the **Plugins** page with `git+https://github.com/lizyoko9/dsh-formula-verify`, then reload DSH.
+- Open the right Sidebar `+` and choose **Formula Lab**.
+- Pick a `.tex`, `.pdf`, `.md`, `.mmd` or `.markdown` file from the workspace, set the output directory, and press **Convert & extract**.
+- For a PDF, choose Mathpix (host env `MATHPIX_APP_ID` / `MATHPIX_APP_KEY`) or an external command such as MinerU; direct PDF extraction is the lossy fallback.
+- The panel shows the section-grouped report; click a card, `report.md` or `index.md` to open it in the document preview.
+
+The panel calls a local host route protected by a per-process token injected into the DSH index; the Python CLI is never exposed to other pages. If you already installed the plain filesystem skill, remove `~/.dsh/skills/formula-verify` before installing the bundle so the same skill is not registered twice.
+
 ## From a paper (TeX or PDF)
 
 ```bash
