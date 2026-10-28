@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.5 — 2026-10-28
+
+- Handle real-paper LaTeX in auto-probe: strip trailing punctuation, normalize `\bar`, `\widehat`, `\widetilde`, `\!`/`\,`/`\;`, `\max`/`\min`/`\arg`, and classify starred/indexed/function left-hand sides as definitions.
+- Treat partial-derivative left-hand sides as `needs-modeling` instead of `unparsed`.
+- Real-paper test: a 20-equation IEEE paper now yields 14 definitions + 6 needs-modeling, 0 unparsed, instead of 14 unparsed.
+
 ## 0.4.4 — 2026-10-28
 
 - Fix the noisy card `Context` line: take the prose paragraph before the equation, remove neighboring display-math environments, and convert LaTeX with `pylatexenc` instead of deleting commands.

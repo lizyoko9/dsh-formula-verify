@@ -116,6 +116,14 @@ def parse_expression(text: str, assumptions: dict[str, dict] | None = None):
     )
 
     raw = text.strip().strip("$")
+    # Formatting commands that latex2sympy2 does not accept but that do not
+    # change the mathematical object for a parse-level check.
+    raw = re.sub(r"\\!|\\,|\\;|\\:", "", raw)
+    raw = re.sub(r"\\(bar|overline)\s*\{([^{}]*)\}", r"\2", raw)
+    raw = re.sub(r"\\(bar|overline)\s+([A-Za-z])", r"\2", raw)
+    raw = re.sub(r"\\(widehat|widetilde|hat|tilde)\s*\{([^{}]*)\}", r"\2", raw)
+    raw = re.sub(r"\\(widehat|widetilde|hat|tilde)\s+([A-Za-z])", r"\2", raw)
+    raw = re.sub(r"\\(max|min|arg)\b", r"\1", raw)
     expression = None
     if "\\" in raw or (raw.count("{") and raw.count("}")):
         try:
@@ -429,7 +437,8 @@ def clean_tex_fragment(value: str) -> str:
     value = value.replace("&", " ").replace("\\\\", " ")
     value = re.sub(r"\\(tag|intertext)\{[^}]*\}", "", value)
     value = re.sub(r"\\q?quad\b", " ", value)
-    return re.sub(r"\s+", " ", value).strip()
+    value = re.sub(r"\s+", " ", value).strip()
+    return re.sub(r"[\s,.;:]+$", "", value)
 
 
 def section_at(sections, position: int) -> str:
@@ -629,15 +638,34 @@ def probe_equation(latex: str):
     if parts is None:
         return {"status": "needs-modeling", "reason": "not a single top-level equality"}
     lhs_text, rhs_text = parts
+    if re.search(r"\^\s*(?:\{\s*\\?star\s*\}|\\?star|\*)", lhs_text):
+        return {"status": "definition", "lhs": lhs_text.strip()}
+    if re.search(r"\\partial|\\frac\{\\partial", lhs_text):
+        return {"status": "needs-modeling", "reason": "partial derivative; model manually"}
+    if re.match(r"^\s*[A-Za-z][A-Za-z0-9_]*\s*\([^)]*\)\s*$", lhs_text):
+        return {"status": "definition", "lhs": lhs_text.strip()}
     try:
         lhs = parse_expression(lhs_text)
+    except SystemExit as error:
+        return {"status": "unparsed", "reason": str(error)}
+    except Exception as error:
+        return {"status": "unparsed", "reason": str(error)}
+    is_definition = bool(
+        lhs.is_Symbol
+        or lhs.is_Function
+        or (lhs.is_Pow and lhs.base.is_Symbol and "_" in lhs.base.name)
+        or getattr(lhs, "is_Indexed", False)
+        or getattr(lhs, "is_MatrixElement", False)
+        or lhs.__class__.__name__ in ("Indexed", "IndexedBase", "MatrixElement")
+    )
+    if is_definition:
+        return {"status": "definition", "lhs": str(lhs)}
+    try:
         rhs = parse_expression(rhs_text)
     except SystemExit as error:
         return {"status": "unparsed", "reason": str(error)}
     except Exception as error:
         return {"status": "unparsed", "reason": str(error)}
-    if lhs.is_Symbol or lhs.is_Function:
-        return {"status": "definition", "lhs": str(lhs), "rhs": str(rhs)}
     try:
         symbolic = symbolic_check(lhs, rhs)
         numeric = numeric_check(lhs, rhs, {}, 3)
