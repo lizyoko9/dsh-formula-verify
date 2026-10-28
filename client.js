@@ -260,7 +260,7 @@ window.__ModuleLoader__.load({
           if (right === undefined || typeof right.openResourceIn !== 'function') return;
           const path = [out.replace(/\/+$/, ''), relative].filter(Boolean).join('/').replace(/\/+/g, '/');
           try {
-            right.openResourceIn(sessionId, fileAddress(sessionId, path), { preferNewPane: true });
+            right.openResourceIn(sessionId, fileAddress(sessionId, path));
           } catch (failure) {
             console.error('formula-lab: could not open ' + path, failure);
           }

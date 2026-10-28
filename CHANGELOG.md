@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.2 — 2026-10-28
+
+- Do not split the right Sidebar when opening a card or report; the preview opens as a normal tab in the same pane.
+- Keep `keepMounted` on the Formula Lab tab, so the report state survives switching to the preview tab and back.
+
 ## 0.4.1 — 2026-10-28
 
 - Keep the Formula Lab panel mounted across tab switches (`keepMounted`), so opening a card/report no longer resets the extracted result.
