@@ -517,11 +517,23 @@ def make_identifier(label: str, index: int, used: set) -> str:
     return candidate
 
 
+def row_has_equals(row: str) -> bool:
+    value = re.sub(r"\\(label|nonumber|notag)\{[^}]*\}", "", row)
+    return re.search(r"(?<![<>!:])=(?!=)", value) is not None
+
+
 def tex_rows(body: str, environment: str):
     if environment in TEX_MULTI_ROW:
         body = re.sub(r"\\\\\s*\[[^\]]*\]", "\n", body)
         body = body.replace("\\\\", "\n")
-        return [row for row in body.splitlines() if row.strip()]
+        rows = [row for row in body.splitlines() if row.strip()]
+        merged = []
+        for row in rows:
+            if merged and not row_has_equals(row):
+                merged[-1] = merged[-1].rstrip() + " " + row.strip()
+            else:
+                merged.append(row.strip())
+        return merged
     return [body]
 
 

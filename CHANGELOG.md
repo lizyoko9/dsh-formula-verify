@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.6 — 2026-10-28
+
+- Merge `align` rows without a top-level equality into the previous row, so a formula wrapped across lines is one card instead of two.
+- Real-paper pass on `sim-crossband-beam-alignment` improved from 14 unparsed to 0, yielding 19 cards: 14 definitions + 5 needs-modeling.
+
 ## 0.4.5 — 2026-10-28
 
 - Handle real-paper LaTeX in auto-probe: strip trailing punctuation, normalize `\bar`, `\widehat`, `\widetilde`, `\!`/`\,`/`\;`, `\max`/`\min`/`\arg`, and classify starred/indexed/function left-hand sides as definitions.
