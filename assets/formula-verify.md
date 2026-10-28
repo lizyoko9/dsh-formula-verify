@@ -69,9 +69,26 @@ python3 {{RESOURCE_DIR}}/scripts/formula_check.py paper report --dir formulas
 ```
 
 - **`.tex` is the reliable path.** The extractor reads `equation`, `equation*`, `align`, `gather`, `multline`, `eqnarray`, `$$...$$` and `\[...\]`, keeps the section/source line and nearby context, and records labels as card IDs.
+- **PDF only?** Convert first, then extract the converted Markdown/TeX:
+
+  ```bash
+  # Mathpix (set MATHPIX_APP_ID / MATHPIX_APP_KEY; uploads the PDF to Mathpix)
+  python3 {{RESOURCE_DIR}}/scripts/formula_check.py paper convert \
+    --input paper.pdf --out paper.md --backend mathpix
+
+  # or any external converter, e.g. MinerU / Nougat
+  python3 {{RESOURCE_DIR}}/scripts/formula_check.py paper convert \
+    --input paper.pdf --out paper.md --backend command \
+    --command 'mineru -p {input} -o {outdir}'
+
+  python3 {{RESOURCE_DIR}}/scripts/formula_check.py paper extract \
+    --input paper.md --out formulas
+  ```
+  Mathpix uploads the PDF to `api.mathpix.com`; `--backend command` runs a shell command, so only use converters you trust.
 - **`.pdf` is a fallback.** It extracts candidate lines with pypdf and marks every card `needs-latex`; convert each candidate to LaTeX before trusting it. Prefer the paper's TeX source when available.
+- `paper extract` also accepts `.md`, `.markdown` and `.mmd`; use this for Mathpix, MinerU or Nougat output.
 - `--no-probe` skips the automatic checks; `--max N` caps the number of cards.
-- `index.md` is the review queue; `report.md` summarizes statuses.
+- `index.md` is the review queue. `report.md` is grouped by section with ✅ symbolic / 🟡 numeric only / ❌ failed / ⏳ pending markers; `report.json` is the machine-readable version.
 - **Extraction is a draft, not a verdict.** Delete non-claims and definitions, add assumptions/domains/units, replace the skipped pytest stub with the real model, then run `test`.
 
 Auto-probe statuses:

@@ -91,7 +91,24 @@ python3 ~/.dsh/skills/formula-verify/scripts/formula_check.py paper report --dir
 
 - TeX is the reliable source: `equation`, `align`, `gather`, `multline`, `eqnarray`, `$$...$$` and `\[...\]` are extracted with section, source line, label and context.
 - PDF is a fallback: candidate lines are extracted with pypdf and marked `needs-latex`; convert them to LaTeX before trusting.
-- The extractor writes `eq-*.md`, `test_eq_*.py` stubs, `index.md` and `report.md`.
+- `paper extract` also accepts `.md`, `.markdown` and `.mmd` from Mathpix, MinerU or Nougat.
+- To convert a PDF first:
+
+  ```bash
+  # Mathpix (requires MATHPIX_APP_ID / MATHPIX_APP_KEY; uploads the PDF)
+  python3 ~/.dsh/skills/formula-verify/scripts/formula_check.py paper convert \
+    --input paper.pdf --out paper.md --backend mathpix
+
+  # or an external converter such as MinerU / Nougat
+  python3 ~/.dsh/skills/formula-verify/scripts/formula_check.py paper convert \
+    --input paper.pdf --out paper.md --backend command \
+    --command 'mineru -p {input} -o {outdir}'
+
+  python3 ~/.dsh/skills/formula-verify/scripts/formula_check.py paper extract \
+    --input paper.md --out formulas
+  ```
+  Mathpix uploads the PDF to `api.mathpix.com`; `--backend command` runs a shell command, so only use converters you trust.
+- The extractor writes `eq-*.md`, `test_eq_*.py` stubs, `index.md`, a section-grouped `report.md` and `report.json`.
 - Auto-probe statuses: `verified-symbolic`, `numeric-evidence`, `probe-failed`, `definition`, `needs-modeling`, `unparsed`, `needs-latex`.
 - Extraction is a draft: review, fill assumptions, replace the skipped pytest stub with the real model, then run `test`.
 

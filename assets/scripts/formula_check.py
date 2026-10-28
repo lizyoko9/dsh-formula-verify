@@ -21,6 +21,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 DSH_HOME = Path(os.environ.get("DSH_HOME", Path.home() / ".dsh"))
@@ -65,6 +66,7 @@ def ensure_runtime() -> None:
                     "latex2sympy2",
                     "pytest",
                     "pypdf",
+                    "requests",
                 ]
             )
         except Exception as error:
@@ -474,6 +476,11 @@ def extract_tex_items(path: Path):
     raw = path.read_text(errors="replace")
     text = strip_tex_comments(raw)
     sections = [(match.start(), match.group(1).strip()) for match in re.finditer(r"\\section\*?\{([^{}]*)\}", text)]
+    sections += [
+        (match.start(), match.group(2).strip())
+        for match in re.finditer(r"^(#{1,6})\s+(.+)$", text, re.M)
+    ]
+    sections.sort()
     found = []
     env_pattern = re.compile(
         r"\\begin\{(" + "|".join(re.escape(item) for item in TEX_ENVIRONMENTS) + r")\}(.*?)\\end\{\1\}",
@@ -625,6 +632,7 @@ def write_card(directory: Path, item: dict) -> None:
         )
     card = f"""---
 id: {yaml_string(item['id'])}
+order: {item.get('order', 0)}
 title: {yaml_string(item['title'])}
 source: {yaml_string(item['source'])}
 section: {yaml_string(item['section'])}
@@ -688,22 +696,96 @@ def write_index(directory: Path, items: list) -> None:
     (directory / "index.md").write_text("\n".join(rows) + "\n")
 
 
+STATUS_META = {
+    "verified-symbolic": ("✅", "symbolic"),
+    "numeric-evidence": ("🟡", "numeric only"),
+    "probe-failed": ("❌", "failed"),
+    "definition": ("⏳", "definition"),
+    "needs-modeling": ("⏳", "needs model"),
+    "unparsed": ("⏳", "unparsed"),
+    "needs-latex": ("⏳", "needs LaTeX"),
+    "extracted": ("⏳", "extracted"),
+}
+
+
+def status_label(status: str) -> str:
+    icon, label = STATUS_META.get(status, ("⏳", status))
+    return f"{icon} {label}"
+
+
 def write_report(directory: Path) -> dict:
     cards = [(path, read_card_fields(path)) for path in sorted(directory.glob("eq-*.md"))]
+    cards.sort(key=lambda item: (int(item[1].get("order", 9999)), item[1].get("id", item[0].stem)))
     counts = {}
-    rows = ["# Formula verification report", "", f"Cards: {len(cards)}", "", "| ID | Status | Section | Source |", "|---|---|---|---|"]
+    sections = {}
     for path, fields in cards:
         status = fields.get("status", "unknown")
         counts[status] = counts.get(status, 0) + 1
-        rows.append(
-            f"| [{fields.get('id', path.stem)}]({path.name}) | `{status}` | {fields.get('section', '-')} | `{fields.get('source', '-')}` |"
-        )
-    summary = ", ".join(f"{key}: {value}" for key, value in sorted(counts.items())) or "no cards"
-    rows.insert(3, f"Statuses: {summary}")
+        section = fields.get("section", "Unsectioned") or "Unsectioned"
+        sections.setdefault(section, []).append((path, fields))
+
+    rows = ["# Formula verification report", "", f"Cards: {len(cards)}", ""]
+    summary = " · ".join(
+        f"{status_label(key)}: {value}" for key, value in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    ) or "no cards"
+    rows.append(f"Statuses: {summary}")
     if any(fields.get("kind") == "pdf-line" for _, fields in cards):
-        rows.insert(4, "> PDF extraction is lossy: convert each candidate to LaTeX before relying on it.")
+        rows.append("")
+        rows.append("> PDF extraction is lossy: convert each candidate to LaTeX before relying on it.")
+    rows.append("")
+    for section, entries in sections.items():
+        rows.append(f"## {section}")
+        rows.append("")
+        rows.append("| Formula | Status | Source | Card |")
+        rows.append("|---|---|---|---|")
+        pending = []
+        failed = []
+        for path, fields in entries:
+            status = fields.get("status", "unknown")
+            title = fields.get("title", fields.get("id", path.stem))
+            source = fields.get("source", "-")
+            rows.append(f"| {title} | {status_label(status)} | `{source}` | [{path.stem}]({path.name}) |")
+            if status == "probe-failed":
+                failed.append(title)
+            elif status != "verified-symbolic" and status != "numeric-evidence":
+                pending.append(title)
+        rows.append("")
+        if pending:
+            rows.append(f"**To model / review:** {', '.join(pending)}")
+            rows.append("")
+        if failed:
+            rows.append(f"**Failed checks:** {', '.join(failed)}")
+            rows.append("")
+
+    rows.append("## Next steps")
+    rows.append("")
+    rows.append("- Fill symbols, domains, units and assumptions in every card.")
+    rows.append("- Replace the skipped `test_eq_*.py` stub with the real model.")
+    rows.append("- Run `formula_check.py test --path formulas`.")
+    rows.append("- Treat `numeric-evidence` as evidence, not proof; escalate failed or logical claims.")
     (directory / "report.md").write_text("\n".join(rows) + "\n")
-    return {"cards": len(cards), "statuses": counts}
+    manifest = {
+        "cards": len(cards),
+        "statuses": counts,
+        "sections": [
+            {
+                "section": section,
+                "cards": [
+                    {
+                        "id": fields.get("id", path.stem),
+                        "title": fields.get("title", path.stem),
+                        "status": fields.get("status", "unknown"),
+                        "source": fields.get("source", "-"),
+                        "card": path.name,
+                    }
+                    for path, fields in entries
+                ],
+            }
+            for section, entries in sections.items()
+        ],
+    }
+    (directory / "report.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
+    return {"cards": len(cards), "statuses": counts, "sections": len(sections)}
 
 
 def command_paper(args):
@@ -712,12 +794,14 @@ def command_paper(args):
         if not source.exists():
             return {"ok": False, "error": f"input not found: {source}"}, 2
         suffix = source.suffix.lower()
-        if suffix == ".tex":
+        if suffix in (".tex", ".md", ".markdown", ".mmd"):
             raw_items = extract_tex_items(source)
+            latex_source = True
         elif suffix == ".pdf":
             raw_items = extract_pdf_items(source)
+            latex_source = False
         else:
-            return {"ok": False, "error": "input must be .tex or .pdf"}, 2
+            return {"ok": False, "error": "input must be .tex, .md, .markdown, .mmd or .pdf"}, 2
         raw_items = raw_items[: args.max]
         directory = Path(args.out)
         directory.mkdir(parents=True, exist_ok=True)
@@ -728,11 +812,12 @@ def command_paper(args):
             item = {
                 **raw,
                 "id": identifier,
+                "order": index,
                 "title": f"Eq. {index}" + (f" ({raw['label']})" if raw.get("label") else ""),
                 "source": f"{source.name}:{raw.get('source_line', '?')}",
-                "status": "extracted" if suffix == ".tex" else "needs-latex",
+                "status": "extracted" if latex_source else "needs-latex",
             }
-            if suffix == ".tex" and not args.no_probe:
+            if latex_source and not args.no_probe:
                 item["probe"] = probe_equation(item["latex"])
                 item["status"] = item["probe"].get("status", "extracted")
             write_card(directory, item)
@@ -755,6 +840,98 @@ def command_paper(args):
         return {"ok": True, "dir": str(directory), **report}, 0
 
     return {"ok": False, "error": "paper needs an extract or report action"}, 2
+
+
+# ---------------------------------------------------------------------------
+# PDF conversion backends
+
+
+def convert_mathpix(source: Path, out: Path, timeout: int) -> dict:
+    import requests
+
+    app_id = os.environ.get("MATHPIX_APP_ID")
+    app_key = os.environ.get("MATHPIX_APP_KEY")
+    if not app_id or not app_key:
+        raise RuntimeError(
+            "Mathpix needs MATHPIX_APP_ID and MATHPIX_APP_KEY. "
+            "Set them, or use --backend command with MinerU/Nougat."
+        )
+    base = os.environ.get("MATHPIX_API_URL", "https://api.mathpix.com/v3").rstrip("/")
+    headers = {"app_id": app_id, "app_key": app_key}
+    with source.open("rb") as handle:
+        response = requests.post(
+            f"{base}/pdf",
+            headers=headers,
+            files={"file": (source.name, handle, "application/pdf")},
+            data={"options_json": json.dumps({"conversion_formats": {"md": True, "tex.zip": True}})},
+            timeout=120,
+        )
+    if response.status_code >= 400:
+        raise RuntimeError(f"Mathpix upload failed: {response.status_code} {response.text[:300]}")
+    pdf_id = response.json().get("pdf_id")
+    if not pdf_id:
+        raise RuntimeError(f"Mathpix did not return a pdf_id: {response.text[:300]}")
+    deadline = time.monotonic() + max(30, timeout)
+    while True:
+        status = requests.get(f"{base}/pdf/{pdf_id}", headers=headers, timeout=60).json()
+        state = status.get("status")
+        if state in ("completed", "completed_with_errors"):
+            break
+        if state == "failed":
+            raise RuntimeError(f"Mathpix conversion failed: {status}")
+        if time.monotonic() > deadline:
+            raise RuntimeError(f"Mathpix conversion timed out after {timeout}s (pdf_id={pdf_id})")
+        time.sleep(3)
+    kind = "tex" if out.suffix.lower() == ".tex" else "md"
+    download = requests.get(f"{base}/pdf/{pdf_id}.{kind}", headers=headers, timeout=120)
+    if download.status_code != 200 and kind == "md":
+        kind = "tex"
+        download = requests.get(f"{base}/pdf/{pdf_id}.{kind}", headers=headers, timeout=120)
+    if download.status_code != 200:
+        raise RuntimeError(f"Mathpix download failed: {download.status_code} {download.text[:300]}")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(download.content)
+    return {"backend": "mathpix", "pdf_id": pdf_id, "format": kind, "status": state}
+
+
+def convert_command(source: Path, out: Path, command: str) -> dict:
+    if not command:
+        raise RuntimeError("--backend command needs --command with {input} and {outdir} placeholders")
+    outdir = out.parent / (out.stem + "-converted")
+    outdir.mkdir(parents=True, exist_ok=True)
+    expanded = command.replace("{input}", str(source)).replace("{outdir}", str(outdir))
+    subprocess.run(expanded, shell=True, check=True)
+    candidates = [
+        path for path in outdir.rglob("*") if path.is_file() and path.suffix.lower() in (".md", ".markdown", ".mmd", ".tex")
+    ]
+    if not candidates:
+        raise RuntimeError(f"converter produced no .md/.markdown/.mmd/.tex under {outdir}")
+    preferred = [path for path in candidates if path.suffix.lower() == out.suffix.lower()] or candidates
+    chosen = max(preferred, key=lambda path: path.stat().st_size)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(chosen.read_bytes())
+    return {"backend": "command", "command": expanded, "source_output": str(chosen), "format": chosen.suffix.lower().lstrip(".")}
+
+
+def command_convert(args):
+    source = Path(args.input)
+    if not source.exists():
+        return {"ok": False, "error": f"input not found: {source}"}, 2
+    out = Path(args.out)
+    if args.backend == "mathpix" and source.suffix.lower() != ".pdf":
+        return {"ok": False, "error": "the Mathpix backend needs a .pdf input"}, 2
+    try:
+        if args.backend == "mathpix":
+            result = convert_mathpix(source, out, args.timeout)
+        else:
+            result = convert_command(source, out, args.command)
+    except subprocess.CalledProcessError as error:
+        return {"ok": False, "error": f"converter exited with {error.returncode}"}, 2
+    except Exception as error:
+        return {"ok": False, "error": str(error)}, 2
+    return {"ok": True, "input": str(source), "out": str(out), **result}, 0
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -833,12 +1010,23 @@ def build_parser():
     report_parser.add_argument("--dir", default="formulas")
     report_parser.add_argument("--json", action="store_true")
     report_parser.set_defaults(handler=command_paper)
+    convert_parser = paper_sub.add_parser("convert", help="convert a PDF to Markdown/LaTeX before extraction")
+    convert_parser.add_argument("--input", required=True)
+    convert_parser.add_argument("--out", default="paper.md")
+    convert_parser.add_argument("--backend", choices=("mathpix", "command"), required=True)
+    convert_parser.add_argument("--command", help="external converter with {input} and {outdir}, e.g. MinerU")
+    convert_parser.add_argument("--timeout", type=int, default=600)
+    convert_parser.add_argument("--json", action="store_true")
+    convert_parser.set_defaults(handler=command_convert, command="paper")
     paper_parser.set_defaults(handler=command_paper, action=None)
 
     return parser
 
 
 def print_human(result):
+    if "backend" in result:
+        print(f"converted: {result.get('input')} -> {result.get('out')} ({result['backend']}, {result.get('format')})")
+        return
     if "equations" in result:
         print(f"paper: {result['input']} -> {result['out']}")
         print(f"equations: {result['equations']}")

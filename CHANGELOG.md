@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0 — 2026-10-28
+
+- Add `paper convert` with two backends: Mathpix (`MATHPIX_APP_ID` / `MATHPIX_APP_KEY`) and an external `--command` converter such as MinerU/Nougat.
+- Accept `.md`, `.markdown` and `.mmd` sources in `paper extract`, so converted papers feed the same card pipeline.
+- Replace the flat report with a section-grouped `report.md` using ✅ symbolic / 🟡 numeric only / ❌ failed / ⏳ pending markers, and add `report.json`.
+- Add card `order`, so section order follows the paper.
+
 ## 0.2.0 — 2026-10-28
 
 - Add `paper extract` for `.tex` and `.pdf` sources: generates `eq-*.md` cards, pytest stubs, `index.md` and `report.md`.
