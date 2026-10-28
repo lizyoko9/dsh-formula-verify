@@ -260,7 +260,7 @@ window.__ModuleLoader__.load({
           if (right === undefined || typeof right.openResourceIn !== 'function') return;
           const path = [out.replace(/\/+$/, ''), relative].filter(Boolean).join('/').replace(/\/+/g, '/');
           try {
-            right.openResourceIn(sessionId, fileAddress(sessionId, path));
+            right.openResourceIn(sessionId, fileAddress(sessionId, path), { preferNewPane: true });
           } catch (failure) {
             console.error('formula-lab: could not open ' + path, failure);
           }
@@ -373,6 +373,7 @@ window.__ModuleLoader__.load({
         ctx.effect(() => tabs.register({
           id: TYPE_ID,
           kind: KIND,
+          keepMounted: true,
           title: () => t('title'),
           guide: [{
             id: 'lab',

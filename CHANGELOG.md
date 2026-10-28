@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1 — 2026-10-28
+
+- Keep the Formula Lab panel mounted across tab switches (`keepMounted`), so opening a card/report no longer resets the extracted result.
+- Open cards, `report.md` and `index.md` with `preferNewPane`, so the report and the document preview can sit side by side when the sidebar has room.
+
 ## 0.4.0 — 2026-10-28
 
 - Add the Formula Lab client panel: pick a workspace paper, run conversion/extraction, and browse the section-grouped report without typing commands.
