@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Formula Verify",
+    "description": "Turn paper formulas into executable SymPy checks and reusable formula cards."
+  }
+}
