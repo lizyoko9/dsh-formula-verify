@@ -67,6 +67,7 @@ def ensure_runtime() -> None:
                     "pytest",
                     "pypdf",
                     "requests",
+                    "pylatexenc",
                 ]
             )
         except Exception as error:
@@ -441,11 +442,54 @@ def section_at(sections, position: int) -> str:
     return current
 
 
+def strip_math_blocks(value: str) -> str:
+    """Remove display-math environments so nearby prose is not mixed with formulas."""
+    pattern = re.compile(
+        r"\\begin\{(" + "|".join(re.escape(item) for item in TEX_ENVIRONMENTS) + r")\}.*?\\end\{\1\}",
+        re.S,
+    )
+    value = pattern.sub(" ", value)
+    value = re.sub(r"\$\$.*?\$\$", " ", value, flags=re.S)
+    value = re.sub(r"\\\[.*?\\\]", " ", value, flags=re.S)
+    value = re.sub(r"\\\(.*?\\\)", " ", value, flags=re.S)
+    return value
+
+
+def latex_to_text(value: str) -> str:
+    """Best-effort LaTeX prose conversion; math blocks are already gone."""
+    try:
+        from pylatexenc.latex2text import LatexNodes2Text
+
+        return LatexNodes2Text(math_mode="text").latex_to_text(value)
+    except Exception:
+        value = re.sub(
+            r"\\(textbf|textit|emph|texttt|textrm|textsf|text|mathrm|mathbf|mathit)\s*\{([^{}]*)\}",
+            r"\2",
+            value,
+        )
+        value = re.sub(r"\\(label|index|cite|ref|eqref)\s*\{[^{}]*\}", " ", value)
+        value = re.sub(r"\\[a-zA-Z]+\*?", " ", value)
+        return value.replace("{", " ").replace("}", " ")
+
+
 def context_at(text: str, start: int, end: int) -> str:
-    snippet = text[max(0, start - 400):start] + " " + text[end:end + 180]
-    snippet = re.sub(r"\\[a-zA-Z]+\*?(\[[^\]]*\])?(\{[^{}]*\})?", " ", snippet)
-    snippet = re.sub(r"\s+", " ", snippet)
-    return snippet.strip()[:500]
+    """Take the prose paragraph before the equation, not the neighboring formulas."""
+    before = text[:start]
+    paragraphs = re.split(r"\n\s*\n", before)
+    candidate = ""
+    for paragraph in reversed(paragraphs):
+        cleaned = latex_to_text(strip_math_blocks(paragraph))
+        cleaned = re.sub(r"\s+", " ", cleaned)
+        cleaned = re.sub(r"^\s*§\s*", "", cleaned).strip(" .;:")
+        if len(cleaned) >= 20:
+            candidate = cleaned
+            break
+        if cleaned and not candidate:
+            candidate = cleaned
+    if candidate == "":
+        raw = strip_math_blocks(before[-300:])
+        candidate = re.sub(r"\s+", " ", latex_to_text(raw)).strip()
+    return candidate[-400:]
 
 
 def make_identifier(label: str, index: int, used: set) -> str:

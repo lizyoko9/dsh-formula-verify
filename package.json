@@ -1,6 +1,6 @@
 {
   "name": "dsh-formula-verify",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "Formula verification skill, Formula Lab panel and SymPy CLI for DeepSeek Harness",
   "type": "module",
   "main": "lib/index.js",

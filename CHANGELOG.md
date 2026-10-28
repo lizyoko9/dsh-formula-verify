@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.4 — 2026-10-28
+
+- Fix the noisy card `Context` line: take the prose paragraph before the equation, remove neighboring display-math environments, and convert LaTeX with `pylatexenc` instead of deleting commands.
+- Add `pylatexenc` to the private environment bootstrap.
+- Strip the section sign that `latex2text` emits for `\section`.
+
 ## 0.4.3 — 2026-10-28
 
 - Render the formula in each card as a Markdown display-math block (`$$...$$`) instead of a `latex` code fence, so the document preview can typeset it.
