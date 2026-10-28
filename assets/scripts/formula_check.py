@@ -64,6 +64,7 @@ def ensure_runtime() -> None:
                     "sympy",
                     "latex2sympy2",
                     "pytest",
+                    "pypdf",
                 ]
             )
         except Exception as error:
@@ -129,6 +130,15 @@ def parse_expression(text: str, assumptions: dict[str, dict] | None = None):
                 expression = parse_expr(_latex_fallback(raw), transformations=transformations, evaluate=True)
             except Exception as error:
                 raise SystemExit(f"formula-verify: cannot parse {text!r}: {error}")
+
+    # SymPy's E is exp(1); a lone uppercase E in a paper is usually energy.
+    try:
+        import sympy as sp
+
+        if expression.has(sp.E):
+            expression = expression.subs(sp.E, sp.Symbol("E", real=True))
+    except Exception:
+        pass
 
     if assumptions:
         for symbol in list(expression.free_symbols):
@@ -380,6 +390,374 @@ def command_test(args):
 
 
 # ---------------------------------------------------------------------------
+# paper extraction
+
+
+TEX_ENVIRONMENTS = (
+    "equation",
+    "equation*",
+    "align",
+    "align*",
+    "gather",
+    "gather*",
+    "multline",
+    "multline*",
+    "eqnarray",
+    "eqnarray*",
+    "displaymath",
+)
+TEX_MULTI_ROW = {"align", "align*", "gather", "gather*", "eqnarray", "eqnarray*"}
+
+
+def strip_tex_comments(text: str) -> str:
+    lines = []
+    for line in text.splitlines():
+        chunk = []
+        for index, char in enumerate(line):
+            if char == "%" and (index == 0 or line[index - 1] != "\\"):
+                break
+            chunk.append(char)
+        lines.append("".join(chunk))
+    return "\n".join(lines)
+
+
+def clean_tex_fragment(value: str) -> str:
+    value = re.sub(r"\\(label|nonumber|notag)\{[^}]*\}", "", value)
+    value = value.replace("&", " ").replace("\\\\", " ")
+    value = re.sub(r"\\(tag|intertext)\{[^}]*\}", "", value)
+    value = re.sub(r"\\q?quad\b", " ", value)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def section_at(sections, position: int) -> str:
+    current = ""
+    for start, name in sections:
+        if start <= position:
+            current = name
+        else:
+            break
+    return current
+
+
+def context_at(text: str, start: int, end: int) -> str:
+    snippet = text[max(0, start - 400):start] + " " + text[end:end + 180]
+    snippet = re.sub(r"\\[a-zA-Z]+\*?(\[[^\]]*\])?(\{[^{}]*\})?", " ", snippet)
+    snippet = re.sub(r"\s+", " ", snippet)
+    return snippet.strip()[:500]
+
+
+def make_identifier(label: str, index: int, used: set) -> str:
+    identifier = f"eq-{index:03d}"
+    if label:
+        cleaned = re.sub(r"^eq[:.-]+", "", label.strip())
+        cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "-", cleaned).strip("-")
+        if cleaned:
+            identifier = f"eq-{cleaned}"
+    candidate = identifier
+    suffix = 2
+    while candidate in used:
+        candidate = f"{identifier}-{suffix}"
+        suffix += 1
+    used.add(candidate)
+    return candidate
+
+
+def tex_rows(body: str, environment: str):
+    if environment in TEX_MULTI_ROW:
+        body = re.sub(r"\\\\\s*\[[^\]]*\]", "\n", body)
+        body = body.replace("\\\\", "\n")
+        return [row for row in body.splitlines() if row.strip()]
+    return [body]
+
+
+def extract_tex_items(path: Path):
+    raw = path.read_text(errors="replace")
+    text = strip_tex_comments(raw)
+    sections = [(match.start(), match.group(1).strip()) for match in re.finditer(r"\\section\*?\{([^{}]*)\}", text)]
+    found = []
+    env_pattern = re.compile(
+        r"\\begin\{(" + "|".join(re.escape(item) for item in TEX_ENVIRONMENTS) + r")\}(.*?)\\end\{\1\}",
+        re.S,
+    )
+    for match in env_pattern.finditer(text):
+        environment = match.group(1)
+        body = match.group(2)
+        for row in tex_rows(body, environment):
+            label_match = re.search(r"\\label\{([^}]*)\}", row)
+            label = label_match.group(1) if label_match else ""
+            latex = clean_tex_fragment(row)
+            if not latex:
+                continue
+            found.append({
+                "pos": match.start(),
+                "latex": latex,
+                "label": label,
+                "kind": environment,
+                "section": section_at(sections, match.start()),
+                "source_line": text[:match.start()].count("\n") + 1,
+                "context": context_at(text, match.start(), match.end()),
+            })
+    for pattern in (re.compile(r"\$\$(.+?)\$\$", re.S), re.compile(r"\\\[(.+?)\\\]", re.S)):
+        for match in pattern.finditer(text):
+            latex = clean_tex_fragment(match.group(1))
+            if not latex:
+                continue
+            found.append({
+                "pos": match.start(),
+                "latex": latex,
+                "label": "",
+                "kind": "display-math",
+                "section": section_at(sections, match.start()),
+                "source_line": text[:match.start()].count("\n") + 1,
+                "context": context_at(text, match.start(), match.end()),
+            })
+    found.sort(key=lambda item: item["pos"])
+    return found
+
+
+def looks_like_pdf_equation(line: str) -> bool:
+    if "=" not in line or len(line) < 8 or len(line) > 300:
+        return False
+    if line.count(" ") > len(line) * 0.55:
+        return False
+    math_hint = "∫∑√±×·≤≥≠≈∞^_αβγθλμσπΔ∂∇"
+    return any(char in line for char in math_hint) or bool(re.search(r"\d", line))
+
+
+def extract_pdf_items(path: Path):
+    try:
+        from pypdf import PdfReader
+    except Exception as error:
+        raise SystemExit(f"formula-verify: PDF support needs pypdf: {error}")
+    reader = PdfReader(str(path))
+    found = []
+    for page_number, page in enumerate(reader.pages, start=1):
+        text = page.extract_text() or ""
+        lines = [line.strip() for line in text.splitlines()]
+        for index, line in enumerate(lines):
+            if not looks_like_pdf_equation(line):
+                continue
+            context = " ".join(lines[max(0, index - 2):index + 3])
+            found.append({
+                "pos": page_number,
+                "latex": line,
+                "label": "",
+                "kind": "pdf-line",
+                "section": f"PDF page {page_number}",
+                "source_line": page_number,
+                "context": re.sub(r"\s+", " ", context)[:500],
+            })
+    return found
+
+
+def split_equation(latex: str):
+    text = re.sub(r"\\(label|nonumber|notag)\{[^}]*\}", "", latex)
+    text = text.replace("&", " ").replace("\\\\", " ")
+    depth = 0
+    positions = []
+    for index, char in enumerate(text):
+        if char in "({[":
+            depth += 1
+        elif char in ")}]":
+            depth = max(0, depth - 1)
+        elif char == "=" and depth == 0:
+            previous = text[index - 1] if index else ""
+            following = text[index + 1] if index + 1 < len(text) else ""
+            if previous in "<>!:=" or following == "=":
+                continue
+            positions.append(index)
+    if len(positions) != 1:
+        return None
+    return text[:positions[0]].strip(), text[positions[0] + 1:].strip()
+
+
+def probe_equation(latex: str):
+    import sympy as sp
+
+    parts = split_equation(latex)
+    if parts is None:
+        return {"status": "needs-modeling", "reason": "not a single top-level equality"}
+    lhs_text, rhs_text = parts
+    try:
+        lhs = parse_expression(lhs_text)
+        rhs = parse_expression(rhs_text)
+    except SystemExit as error:
+        return {"status": "unparsed", "reason": str(error)}
+    except Exception as error:
+        return {"status": "unparsed", "reason": str(error)}
+    if lhs.is_Symbol or lhs.is_Function:
+        return {"status": "definition", "lhs": str(lhs), "rhs": str(rhs)}
+    try:
+        symbolic = symbolic_check(lhs, rhs)
+        numeric = numeric_check(lhs, rhs, {}, 3)
+    except Exception as error:
+        return {"status": "probe-failed", "error": str(error)}
+    if symbolic["zero"]:
+        status = "verified-symbolic"
+    elif numeric["passed"]:
+        status = "numeric-evidence"
+    else:
+        status = "probe-failed"
+    return {
+        "status": status,
+        "lhs": str(lhs),
+        "rhs": str(rhs),
+        "symbolic": symbolic,
+        "numeric": {
+            "passed": numeric["passed"],
+            "samples": numeric["samples"],
+            "max_relative_error": numeric["max_relative_error"],
+        },
+    }
+
+
+def yaml_string(value: str) -> str:
+    return json.dumps(str(value), ensure_ascii=False)
+
+
+def write_card(directory: Path, item: dict) -> None:
+    probe = item.get("probe")
+    probe_block = ""
+    if probe:
+        probe_block = (
+            f"**Auto probe.** `{probe.get('status', 'unknown')}`\n\n"
+            "```json\n" + json.dumps(probe, ensure_ascii=False, indent=2, default=str) + "\n```\n\n"
+        )
+    card = f"""---
+id: {yaml_string(item['id'])}
+title: {yaml_string(item['title'])}
+source: {yaml_string(item['source'])}
+section: {yaml_string(item['section'])}
+kind: {yaml_string(item['kind'])}
+status: {yaml_string(item['status'])}
+---
+
+## {item['title']}
+
+Source: `{item['source']}` · {item['section']}
+
+~~~latex
+{item['latex']}
+~~~
+
+**Context.** {item['context'] or '(none extracted)'}
+
+{probe_block}**Checks** (TODO)
+
+- [ ] symbols, domains and units
+- [ ] symbolic equivalence
+- [ ] numeric samples and edge cases
+- [ ] what remains unproven
+"""
+    (directory / f"{item['id']}.md").write_text(card)
+    stub = (
+        f'"""Auto-extracted from {item["source"]}. Fill in the model before relying on it."""\n\n'
+        "import pytest\nimport sympy as sp\n\n"
+        "# TODO: define symbols with domains, then model the equation in the card.\n\n\n"
+        "def test_identity():\n"
+        f'    pytest.skip("TODO: model {item["id"]}")\n'
+    )
+    module_name = re.sub(r"[^A-Za-z0-9_]", "_", item["id"])
+    (directory / f"test_{module_name}.py").write_text(stub)
+
+
+def read_card_fields(path: Path) -> dict:
+    text = path.read_text(errors="replace")
+    match = re.match(r"^---\n(.*?)\n---\n", text, re.S)
+    if not match:
+        return {}
+    fields = {}
+    for line in match.group(1).splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        value = value.strip()
+        try:
+            fields[key.strip()] = json.loads(value)
+        except Exception:
+            fields[key.strip()] = value.strip('"')
+    return fields
+
+
+def write_index(directory: Path, items: list) -> None:
+    rows = ["# Formula index", "", "| ID | Section | Source | Status |", "|---|---|---|---|"]
+    for item in items:
+        rows.append(
+            f"| [{item['id']}]({item['id']}.md) | {item['section'] or '-'} | `{item['source']}` | `{item['status']}` |"
+        )
+    (directory / "index.md").write_text("\n".join(rows) + "\n")
+
+
+def write_report(directory: Path) -> dict:
+    cards = [(path, read_card_fields(path)) for path in sorted(directory.glob("eq-*.md"))]
+    counts = {}
+    rows = ["# Formula verification report", "", f"Cards: {len(cards)}", "", "| ID | Status | Section | Source |", "|---|---|---|---|"]
+    for path, fields in cards:
+        status = fields.get("status", "unknown")
+        counts[status] = counts.get(status, 0) + 1
+        rows.append(
+            f"| [{fields.get('id', path.stem)}]({path.name}) | `{status}` | {fields.get('section', '-')} | `{fields.get('source', '-')}` |"
+        )
+    summary = ", ".join(f"{key}: {value}" for key, value in sorted(counts.items())) or "no cards"
+    rows.insert(3, f"Statuses: {summary}")
+    if any(fields.get("kind") == "pdf-line" for _, fields in cards):
+        rows.insert(4, "> PDF extraction is lossy: convert each candidate to LaTeX before relying on it.")
+    (directory / "report.md").write_text("\n".join(rows) + "\n")
+    return {"cards": len(cards), "statuses": counts}
+
+
+def command_paper(args):
+    if args.action == "extract":
+        source = Path(args.input)
+        if not source.exists():
+            return {"ok": False, "error": f"input not found: {source}"}, 2
+        suffix = source.suffix.lower()
+        if suffix == ".tex":
+            raw_items = extract_tex_items(source)
+        elif suffix == ".pdf":
+            raw_items = extract_pdf_items(source)
+        else:
+            return {"ok": False, "error": "input must be .tex or .pdf"}, 2
+        raw_items = raw_items[: args.max]
+        directory = Path(args.out)
+        directory.mkdir(parents=True, exist_ok=True)
+        used = set()
+        items = []
+        for index, raw in enumerate(raw_items, start=1):
+            identifier = make_identifier(raw.get("label", ""), index, used)
+            item = {
+                **raw,
+                "id": identifier,
+                "title": f"Eq. {index}" + (f" ({raw['label']})" if raw.get("label") else ""),
+                "source": f"{source.name}:{raw.get('source_line', '?')}",
+                "status": "extracted" if suffix == ".tex" else "needs-latex",
+            }
+            if suffix == ".tex" and not args.no_probe:
+                item["probe"] = probe_equation(item["latex"])
+                item["status"] = item["probe"].get("status", "extracted")
+            write_card(directory, item)
+            items.append(item)
+        write_index(directory, items)
+        report = write_report(directory)
+        return {
+            "ok": True,
+            "input": str(source),
+            "out": str(directory),
+            "equations": len(items),
+            "report": report,
+        }, 0
+
+    if args.action == "report":
+        directory = Path(args.dir)
+        if not directory.exists():
+            return {"ok": False, "error": f"directory not found: {directory}"}, 2
+        report = write_report(directory)
+        return {"ok": True, "dir": str(directory), **report}, 0
+
+    return {"ok": False, "error": "paper needs an extract or report action"}, 2
+
+
+# ---------------------------------------------------------------------------
 # CLI
 
 
@@ -442,10 +820,34 @@ def build_parser():
     test_parser.add_argument("pytest_args", nargs=argparse.REMAINDER)
     test_parser.set_defaults(handler=command_test)
 
+    paper_parser = sub.add_parser("paper", help="extract formula cards from a TeX/PDF paper")
+    paper_sub = paper_parser.add_subparsers(dest="action")
+    extract_parser = paper_sub.add_parser("extract", help="extract cards from .tex or .pdf")
+    extract_parser.add_argument("--input", required=True)
+    extract_parser.add_argument("--out", default="formulas")
+    extract_parser.add_argument("--max", type=int, default=80)
+    extract_parser.add_argument("--no-probe", action="store_true", help="skip automatic symbolic/numeric probes")
+    extract_parser.add_argument("--json", action="store_true")
+    extract_parser.set_defaults(handler=command_paper)
+    report_parser = paper_sub.add_parser("report", help="regenerate index.md and report.md from cards")
+    report_parser.add_argument("--dir", default="formulas")
+    report_parser.add_argument("--json", action="store_true")
+    report_parser.set_defaults(handler=command_paper)
+    paper_parser.set_defaults(handler=command_paper, action=None)
+
     return parser
 
 
 def print_human(result):
+    if "equations" in result:
+        print(f"paper: {result['input']} -> {result['out']}")
+        print(f"equations: {result['equations']}")
+        print(f"statuses: {result['report']['statuses']}")
+        return
+    if "cards" in result and "statuses" in result:
+        print(f"cards: {result['cards']}")
+        print(f"statuses: {result['statuses']}")
+        return
     if result.get("command") == "check" or "verdict" in result:
         print(f"ok: {result['ok']} ({result['verdict']})")
         print(f"lhs: {result['lhs']}")

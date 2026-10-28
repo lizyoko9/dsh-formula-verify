@@ -81,6 +81,20 @@ python3 ~/.dsh/skills/formula-verify/scripts/formula_check.py test --path formul
 
 `test` runs pytest inside the private environment, so the project does not need its own pytest or SymPy install.
 
+## From a paper (TeX or PDF)
+
+```bash
+python3 ~/.dsh/skills/formula-verify/scripts/formula_check.py paper extract \
+  --input paper.tex --out formulas --json
+python3 ~/.dsh/skills/formula-verify/scripts/formula_check.py paper report --dir formulas
+```
+
+- TeX is the reliable source: `equation`, `align`, `gather`, `multline`, `eqnarray`, `$$...$$` and `\[...\]` are extracted with section, source line, label and context.
+- PDF is a fallback: candidate lines are extracted with pypdf and marked `needs-latex`; convert them to LaTeX before trusting.
+- The extractor writes `eq-*.md`, `test_eq_*.py` stubs, `index.md` and `report.md`.
+- Auto-probe statuses: `verified-symbolic`, `numeric-evidence`, `probe-failed`, `definition`, `needs-modeling`, `unparsed`, `needs-latex`.
+- Extraction is a draft: review, fill assumptions, replace the skipped pytest stub with the real model, then run `test`.
+
 ## Limits
 
 - SymPy is not a proof assistant. `symbolic` is strong evidence, not a formal proof.

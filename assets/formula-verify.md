@@ -1,7 +1,7 @@
 ---
 name: formula-verify
-description: Verify paper formulas, identities, derivations, limits and logical claims by turning them into executable SymPy checks and reusable formula cards. Use when the user asks whether a formula or derivation is correct, wants to check an integral/derivative/limit, or wants a paper's math made reproducible.
-whenToUse: The user asks to verify a formula, identity, derivation, bound, limit, dimensional consistency, or wants a reusable verification artifact for a paper. Also use when a chat answer would otherwise end with "the formula looks correct" without executable evidence.
+description: Verify paper formulas, identities, derivations, limits and logical claims by turning them into executable SymPy checks and reusable formula cards. Use when the user asks whether a formula or derivation is correct, wants to check an integral/derivative/limit, wants a paper's math made reproducible, or hands over a TeX/PDF paper to extract and verify.
+whenToUse: The user asks to verify a formula, identity, derivation, bound, limit, dimensional consistency, or wants a reusable verification artifact for a paper. Also use when the user provides a .tex or .pdf paper and wants the equations extracted into cards. Also use when a chat answer would otherwise end with "the formula looks correct" without executable evidence.
 ---
 
 # Formula verification
@@ -57,6 +57,34 @@ python3 {{RESOURCE_DIR}}/scripts/formula_check.py test --path formulas/
 ```
 
 `test` runs pytest inside the private SymPy environment, so the project does not need its own pytest/SymPy install.
+
+## From a paper (TeX or PDF)
+
+To turn a whole paper into reviewable cards and a Markdown report:
+
+```bash
+python3 {{RESOURCE_DIR}}/scripts/formula_check.py paper extract \
+  --input paper.tex --out formulas --json
+python3 {{RESOURCE_DIR}}/scripts/formula_check.py paper report --dir formulas
+```
+
+- **`.tex` is the reliable path.** The extractor reads `equation`, `equation*`, `align`, `gather`, `multline`, `eqnarray`, `$$...$$` and `\[...\]`, keeps the section/source line and nearby context, and records labels as card IDs.
+- **`.pdf` is a fallback.** It extracts candidate lines with pypdf and marks every card `needs-latex`; convert each candidate to LaTeX before trusting it. Prefer the paper's TeX source when available.
+- `--no-probe` skips the automatic checks; `--max N` caps the number of cards.
+- `index.md` is the review queue; `report.md` summarizes statuses.
+- **Extraction is a draft, not a verdict.** Delete non-claims and definitions, add assumptions/domains/units, replace the skipped pytest stub with the real model, then run `test`.
+
+Auto-probe statuses:
+
+| Status | Meaning |
+|---|---|
+| `verified-symbolic` | SymPy proved the extracted equality |
+| `numeric-evidence` | samples agree; not a proof |
+| `probe-failed` | a check disagreed, or the equation is not modeled yet |
+| `definition` | left side is a single symbol/function; needs modeling, not an identity check |
+| `needs-modeling` | not a single top-level equality (inequality, approximation, chain) |
+| `unparsed` | the LaTeX parser failed; pass the SymPy form or rewrite the card |
+| `needs-latex` | extracted from PDF; convert to LaTeX first |
 
 ## What to check
 
