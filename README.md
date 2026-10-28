@@ -120,7 +120,7 @@ python3 ~/.dsh/skills/formula-verify/scripts/formula_check.py paper report --dir
     --input paper.md --out formulas
   ```
   Mathpix uploads the PDF to `api.mathpix.com`; `--backend command` runs a shell command, so only use converters you trust.
-- The extractor writes `eq-*.md`, `test_eq_*.py` stubs, `index.md`, a section-grouped `report.md` and `report.json`.
+- The extractor writes `eq-*.md` cards (the formula is a display-math block), `test_eq_*.py` stubs, `index.md`, a section-grouped `report.md` and `report.json`.
 - Auto-probe statuses: `verified-symbolic`, `numeric-evidence`, `probe-failed`, `definition`, `needs-modeling`, `unparsed`, `needs-latex`.
 - Extraction is a draft: review, fill assumptions, replace the skipped pytest stub with the real model, then run `test`.
 

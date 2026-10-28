@@ -644,9 +644,9 @@ status: {yaml_string(item['status'])}
 
 Source: `{item['source']}` · {item['section']}
 
-~~~latex
+$$
 {item['latex']}
-~~~
+$$
 
 **Context.** {item['context'] or '(none extracted)'}
 

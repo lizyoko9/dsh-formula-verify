@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.3 — 2026-10-28
+
+- Render the formula in each card as a Markdown display-math block (`$$...$$`) instead of a `latex` code fence, so the document preview can typeset it.
+- Keep the raw LaTeX in the generated `test_eq_*.py` TODO and in the source line metadata.
+
 ## 0.4.2 — 2026-10-28
 
 - Do not split the right Sidebar when opening a card or report; the preview opens as a normal tab in the same pane.
