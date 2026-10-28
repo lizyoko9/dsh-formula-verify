@@ -30,6 +30,7 @@ python3 {{RESOURCE_DIR}}/scripts/formula_check.py check \
 | `eval --expr ... --values 'x=2,y=3'` | high-precision numeric evaluation |
 | `simplify --expr ...` | canonical simplification |
 | `latex --expr ...` | render back to LaTeX |
+| `test --path formulas/` | run formula-card pytest in the private environment |
 
 Always pass `--json` when you need to parse the result. Read `verdict`: `symbolic` means SymPy proved the difference zero; `numeric` means samples agreed but it is **not a proof**; `failed` means at least one check disagreed.
 

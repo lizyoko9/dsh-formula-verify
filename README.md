@@ -14,7 +14,7 @@ The skill is model-invocable and user-invocable. It ships a self-bootstrapping P
 
 ### As a DSH bundle
 
-Add this repository to a profile bundle list (or install it from the Plugins page once it is published):
+Install from the **Plugins** page with:
 
 ```text
 git+https://github.com/lizyoko9/dsh-formula-verify
@@ -53,6 +53,7 @@ Commands:
 | `eval --expr ... --values 'x=2' --digits 30` | high-precision evaluation |
 | `simplify --expr ...` | canonical simplification |
 | `latex --expr ...` | render to LaTeX |
+| `test --path formulas/` | run formula-card pytest in the private environment |
 | `setup` | prewarm the private SymPy environment |
 
 `check` returns:

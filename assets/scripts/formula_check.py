@@ -267,7 +267,7 @@ def check(args):
         return {"ok": False, "error": "give --lhs/--rhs or --expr"}, 2
     assumptions, notes = parse_assumptions(args.assumptions)
     lhs = parse_expression(args.lhs if args.lhs is not None else args.expr, assumptions)
-    rhs = parse_expression(args.rhs, assumptions) if args.rhs is not None else 0
+    rhs = parse_expression(args.rhs if args.rhs is not None else "0", assumptions)
 
     symbolic = symbolic_check(lhs, rhs)
     numeric = numeric_check(lhs, rhs, assumptions, args.samples)
